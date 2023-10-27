@@ -1,39 +1,36 @@
 #!/usr/bin/python3
-""" Fabric script that distributes an archive to web servers"""
-from fabric.api import *
-from datetime import datetime
-from os import path
-
-env.hosts = ['3.90.83.87', '100.26.215.194']
+"""
+Fabric script method:
+    do_deploy: deploys archive to webservers
+Usage:
+    fab -f 2-do_deploy_web_static.py
+    do_deploy:archive_path=versions/web_static_20170315003959.tgz
+    -i my_ssh_private_key -u ubuntu
+"""
+from fabric.api import env, put, run
+import os.path
+env.hosts = ['35.229.54.225', '35.231.225.251']
 
 
 def do_deploy(archive_path):
     """
-    function distributes an archive to web servers
+    Deploy archive to web server
     """
-    if not path.exists(archive_path):
+    if os.path.isfile(archive_path) is False:
         return False
-
     try:
-        file_name = archive_path.split('/')[-1]
-        file_base = file_name.split('.')[0]
-        path_static = "/data/web_static/releases/{}/".format(file_base)
-
-        put(archive_path, '/tmp/')
-
-        run("mkdir -p {}".format(path_static))
-
-        run("tar -xzf /tmp/{} -C {}".format(file_name, path_static))
-
-        run("rm /tmp/{}".format(file_name))
-        run("mv {}web_static/* {}".format(path_static, path_static))
-        run("rm -rf {}web_static".format(path_static))
-        run("rm -rf /data/web_static/current")
-
-        run("ln -s {} /data/web_static/current".format(path_static))
-        print("New vision deployed")
-
+        filename = archive_path.split("/")[-1]
+        no_ext = filename.split(".")[0]
+        path_no_ext = "/data/web_static/releases/{}/".format(no_ext)
+        symlink = "/data/web_static/current"
+        put(archive_path, "/tmp/")
+        run("mkdir -p {}".format(path_no_ext))
+        run("tar -xzf /tmp/{} -C {}".format(filename, path_no_ext))
+        run("rm /tmp/{}".format(filename))
+        run("mv {}web_static/* {}".format(path_no_ext, path_no_ext))
+        run("rm -rf {}web_static".format(path_no_ext))
+        run("rm -rf {}".format(symlink))
+        run("ln -s {} {}".format(path_no_ext, symlink))
         return True
-    except Exception:
+    except:
         return False
-
