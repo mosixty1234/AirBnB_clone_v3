@@ -1,92 +1,96 @@
 #!/usr/bin/python3
-"""places_reviews"""
+'''Contains the places_reviews view for the API.'''
+from flask import jsonify, request
+from werkzeug.exceptions import NotFound, MethodNotAllowed, BadRequest
+
 from api.v1.views import app_views
-from flask import jsonify, abort, request
 from models import storage
 from models.place import Place
 from models.review import Review
-from datetime import datetime
-import uuid
+from models.user import User
 
 
-@app_views.route('/places/<place_id>/reviews', methods=['GET'])
-@app_views.route('/places/<place_id>/reviews/', methods=['GET'])
-def list_reviews_of_place(place_id):
-    ''' Retrieves a list of all Review objects of a Place '''
-    all_places = storage.all("Place").values()
-    place_obj = [obj.to_dict() for obj in all_places if obj.id == place_id]
-    if place_obj == []:
-        abort(404)
-    list_reviews = [obj.to_dict() for obj in storage.all("Review").values()
-                    if place_id == obj.place_id]
-    return jsonify(list_reviews)
+@app_views.route('/places/<place_id>/reviews', methods=['GET', 'POST'])
+@app_views.route('/reviews/<review_id>', methods=['GET', 'DELETE', 'PUT'])
+def handle_reviews(place_id=None, review_id=None):
+    '''The method handler for the reviews endpoint.
+    '''
+    handlers = {
+        'GET': get_reviews,
+        'DELETE': remove_review,
+        'POST': add_review,
+        'PUT': update_review
+    }
+    if request.method in handlers:
+        return handlers[request.method](place_id, review_id)
+    else:
+        raise MethodNotAllowed(list(handlers.keys()))
 
 
-@app_views.route('/places/<place_id>/reviews', methods=['POST'])
-def create_review(place_id):
-    '''Creates a Review'''
-    if not request.get_json():
-        abort(400, 'Not a JSON')
-    if 'user_id' not in request.get_json():
-        abort(400, 'Missing user_id')
-    user_id = request.json['user_id']
-    if 'text' not in request.get_json():
-        abort(400, 'Missing text')
-    all_places = storage.all("Place").values()
-    place_obj = [obj.to_dict() for obj in all_places if obj.id == place_id]
-    if place_obj == []:
-        abort(404)
-    all_users = storage.all("User").values()
-    user_obj = [obj.to_dict() for obj in all_users if obj.id == user_id]
-    if user_obj == []:
-        abort(404)
-    reviews = []
-    new_review = Review(text=request.json['text'], place_id=place_id,
-                        user_id=user_id)
-    storage.new(new_review)
-    storage.save()
-    reviews.append(new_review.to_dict())
-    return jsonify(reviews[0]), 201
+def get_reviews(place_id=None, review_id=None):
+    '''Gets the review with the given id or all reviews in
+    the place with the given id.
+    '''
+    if place_id:
+        place = storage.get(Place, place_id)
+        if place:
+            reviews = []
+            for review in place.reviews:
+                reviews.append(review.to_dict())
+            return jsonify(reviews)
+    elif review_id:
+        review = storage.get(Review, review_id)
+        if review:
+            return jsonify(review.to_dict())
+    raise NotFound()
 
 
-@app_views.route('/reviews/<review_id>', methods=['GET'])
-def get_review(review_id):
-    '''Retrieves a Review object '''
-    all_reviews = storage.all("Review").values()
-    review_obj = [obj.to_dict() for obj in all_reviews if obj.id == review_id]
-    if review_obj == []:
-        abort(404)
-    return jsonify(review_obj[0])
-
-
-@app_views.route('/reviews/<review_id>', methods=['DELETE'])
-def delete_review(review_id):
-    '''Deletes a Review object'''
-    all_reviews = storage.all("Review").values()
-    review_obj = [obj.to_dict() for obj in all_reviews if obj.id == review_id]
-    if review_obj == []:
-        abort(404)
-    review_obj.remove(review_obj[0])
-    for obj in all_reviews:
-        if obj.id == review_id:
-            storage.delete(obj)
-            storage.save()
-    return jsonify({}), 200
-
-
-@app_views.route('/reviews/<review_id>', methods=['PUT'])
-def updates_review(review_id):
-    '''Updates a Review object'''
-    all_reviews = storage.all("Review").values()
-    review_obj = [obj.to_dict() for obj in all_reviews if obj.id == review_id]
-    if review_obj == []:
-        abort(404)
-    if not request.get_json():
-        abort(400, 'Not a JSON')
-    if 'text' in request.get_json():
-        review_obj[0]['text'] = request.json['text']
-        for obj in all_reviews:
-            if obj.id == review_id:
-                obj.text = request.json['text']
+def remove_review(place_id=None, review_id=None):
+    '''Removes a review with the given id.
+    '''
+    review = storage.get(Review, review_id)
+    if review:
+        storage.delete(review)
         storage.save()
-    return jsonify(review_obj[0]), 200
+        return jsonify({}), 200
+    raise NotFound()
+
+
+def add_review(place_id=None, review_id=None):
+    '''Adds a new review.
+    '''
+    place = storage.get(Place, place_id)
+    if not place:
+        raise NotFound()
+    data = request.get_json()
+    if type(data) is not dict:
+        raise BadRequest(description='Not a JSON')
+    if 'user_id' not in data:
+        raise BadRequest(description='Missing user_id')
+    user = storage.get(User, data['user_id'])
+    if not user:
+        raise NotFound()
+    if 'text' not in data:
+        raise BadRequest(description='Missing text')
+    data['place_id'] = place_id
+    new_review = Review(**data)
+    new_review.save()
+    return jsonify(new_review.to_dict()), 201
+
+
+def update_review(place_id=None, review_id=None):
+    '''Updates the review with the given id.
+    '''
+    xkeys = ('id', 'user_id', 'place_id', 'created_at', 'updated_at')
+    if review_id:
+        review = storage.get(Review, review_id)
+        if review:
+            data = request.get_json()
+            if type(data) is not dict:
+                raise BadRequest(description='Not a JSON')
+            for key, value in data.items():
+                if key not in xkeys:
+                    setattr(review, key, value)
+            review.save()
+            return jsonify(review.to_dict()), 200
+    raise NotFound()
